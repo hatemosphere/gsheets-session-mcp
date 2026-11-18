@@ -9,6 +9,12 @@ An unpacked Chrome extension performs reads and saves inside an open Sheets tab.
 Google cookies and session tokens stay in the browser; the MCP process sees only
 sheet data and commands over a loopback-only WebSocket.
 
+Targeting is dynamic. Every tool takes an optional `spreadsheet` (a full Sheets
+URL or a bare spreadsheet ID) and optional `gid`. If you omit them and exactly
+one Sheets tab is open, that tab is used; if several are open, the call errors and
+lists them so you can pick one. `list_sheets` returns every open Sheets tab. There
+is no per-sheet config: open the sheet in Chrome and address it by URL/ID.
+
 ## How it works
 
 ```mermaid
@@ -46,12 +52,11 @@ The implementation avoids UI automation and reads only these narrow tab values.
    ```
    pnpm install
    ```
-2. Create the config from the template. The MCP needs only the spreadsheet ID and
-   tab gid:
+2. Config is optional. There is no spreadsheet ID in config - tools target the
+   open tab by URL/ID. The only setting is `activity` limits; create
+   `secrets.local.json` from the template only if you want to change them:
    ```json
    {
-     "spreadsheetId": "YOUR_SPREADSHEET_ID",
-     "gid": "0",
      "activity": {
        "maxEvents": 200,
        "maxChangesPerEvent": 500,
@@ -59,16 +64,16 @@ The implementation avoids UI automation and reads only these narrow tab values.
      }
    }
    ```
-   `activity` is optional; omitted fields use those defaults. Memory is measured
-   as approximate UTF-8 JSON size, not V8 heap overhead. Optional `sid`, `rev`,
-   and `reqId` values retain an accepted save session. Existing `cookie`, `token`,
-   and `ouid` fields are ignored by the MCP.
+   Omitted fields use those defaults. Memory is measured as approximate UTF-8 JSON
+   size, not V8 heap overhead. The save session (sid/rev/reqId) is held in memory
+   per spreadsheet and needs no config.
 3. Open `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**,
    and select the `extension/` directory. Keep the extension enabled. After
    updating files in `extension/`, use the extension's **Reload** button so Chrome
    drops its cached script version.
-4. Keep the target spreadsheet open in that Chrome profile. No reload is needed
-   for tabs that were already open; the extension injects its tab client on demand.
+4. Keep the sheet(s) you want to work with open in that Chrome profile. No reload
+   is needed for tabs that were already open; the extension injects its tab client
+   on demand. Any open Sheets tab can be targeted by URL/ID.
 5. Register the MCP server with your client as before, pointing at the absolute
    path of `server.mjs` (for example `node /path/to/server.mjs`).
 
@@ -78,15 +83,19 @@ config or recapturing a request.
 
 ## Tools
 
+All tools except `list_sheets` accept an optional `spreadsheet` (URL or ID) and
+optional `gid`; omit them to use the single open Sheets tab.
+
 | Tool | Input | Output |
 | --- | --- | --- |
-| `read_range` | `{range?}` | `{rows: string[][]}` from gviz |
-| `write_cells` | `{edits: [{a1, value}]}` | `{written, rev}`; atomic save |
-| `clear_cells` | `{cells: [a1]}` | `{written, rev}`; writes empty strings |
-| `get_selection` | `{includeValues?}` | active range, up to 2000 cell values, viewers with status |
-| `list_revisions` | `{limit?}` | newest-first versions with timestamp, authors, range, name |
-| `diff_revisions` | `{fromRevision, toRevision, range?, maxChanges?}` | structured cell changes and summary |
-| `get_activity` | `{limit?, since?}` | in-memory live activity events with revision, authors, and cell changes |
+| `list_sheets` | `{}` | open Sheets tabs: `{spreadsheetId, gid, title, url, active}` |
+| `read_range` | `{spreadsheet?, gid?, range?}` | `{rows: string[][]}` from gviz |
+| `write_cells` | `{spreadsheet?, gid?, edits: [{a1, value}]}` | `{written, rev}`; atomic save |
+| `clear_cells` | `{spreadsheet?, gid?, cells: [a1]}` | `{written, rev}`; writes empty strings |
+| `get_selection` | `{spreadsheet?, gid?, includeValues?}` | active range, up to 2000 cell values, viewers with status |
+| `list_revisions` | `{spreadsheet?, limit?}` | newest-first versions with timestamp, authors, range, name |
+| `diff_revisions` | `{spreadsheet?, gid?, fromRevision, toRevision, range?, maxChanges?}` | structured cell changes and summary |
+| `get_activity` | `{spreadsheet?, limit?, since?}` | in-memory live activity events with revision, authors, and cell changes |
 
 `get_selection` example:
 
@@ -133,12 +142,13 @@ the previous newest event's `time` as `since`:
 
 ```json
 {
-  "trackingRevision": 259,
+  "tracking": { "YOUR_SPREADSHEET_ID": 259 },
   "total": 1,
   "limits": { "maxEvents": 200, "maxChangesPerEvent": 500, "maxMemoryMb": 8, "maxMemoryBytes": 8388608 },
   "sizeBytes": 612,
   "events": [{
     "time": "2026-11-03T12:10:21.604Z",
+    "spreadsheetId": "YOUR_SPREADSHEET_ID",
     "revision": 259,
     "fromRevision": 258,
     "authors": ["sam.carter@example.com", "Jordan Lee"],
@@ -147,6 +157,9 @@ the previous newest event's `time` as `since`:
   }]
 }
 ```
+
+`tracking` maps each monitored spreadsheet ID to its last-seen revision. Pass
+`spreadsheet` to `get_activity` to filter the log to one sheet.
 
 ## Limits / caveats
 
@@ -166,7 +179,10 @@ the previous newest event's `time` as `since`:
   are evicted first; an oversized event is trimmed and dropped if its metadata
   alone cannot fit. The log resets when the MCP restarts. Edits made while MCP or the extension is disconnected are not
   logged; query `list_revisions`/`diff_revisions` for the full history. It includes
-  MCP-originated writes too.
+  MCP-originated writes too. Tracking is per spreadsheet across all open tabs; the
+  exact before/after diff uses the gid of that sheet's open tab (falling back to
+  `0`), so on a multi-tab document, changes on a sheet other than the open tab's
+  may appear only under `channel` without a full cell diff.
 - **Author attribution is revision-level.** Authors come from the covering version
   tile and can include several people; this is not per-cell blame.
 - **Undocumented endpoints.** Google can change `/save`, `/revisions/tiles`, or
@@ -184,11 +200,13 @@ the previous newest event's `time` as `since`:
 - `lib/bridge.mjs` - loopback WebSocket bridge and request queue
 - `lib/activity.mjs` - bounded in-memory activity store and limits
 - `lib/encode.mjs` - `/save` mutation encoder
+- `lib/target.mjs` - parse a Sheets URL or ID into `{spreadsheetId, gid}`
 - `lib/streamrows.mjs` - StreamRows response decoder for observed cell changes
 - `extension/` - unpacked Chrome MV3 extension
 - `save-write.mjs` - **legacy** standalone writer; it still uses captured
   `cookie`/`token` fields directly and is separate from the MCP path
 - `test-encode.mjs` - encoder regression test
+- `test-target.mjs` - sheet URL/ID parser test
 - `test-activity.mjs` - activity cap, trimming, memory, and filtering test
 - `test-streamrows.mjs` - StreamRows decoder regression test
 

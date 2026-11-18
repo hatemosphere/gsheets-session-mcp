@@ -88,7 +88,10 @@ function connect() {
 
     let response;
     try {
-      response = { type: 'response', id: msg.id, result: await runInSheet(msg.action, msg.params) };
+      const result = msg.action === 'list_sheets'
+        ? await listSheets()
+        : await runInSheet(msg.action, msg.params);
+      response = { type: 'response', id: msg.id, result };
     } catch (error) {
       response = { type: 'response', id: msg.id, error: String(error.message ?? error) };
     }
@@ -101,6 +104,26 @@ function connect() {
     reconnectTimer = setTimeout(connect, retryDelay);
     retryDelay = Math.min(retryDelay * 2, 15_000);
   };
+}
+
+async function listSheets() {
+  const tabs = await chrome.tabs.query({ url: 'https://docs.google.com/spreadsheets/d/*' });
+  const sheets = [];
+  for (const tab of tabs) {
+    const idMatch = /\/spreadsheets\/(?:u\/\d+\/)?d\/([^/]+)/.exec(tab.url ?? '');
+    if (!idMatch) continue;
+    const gidMatch = /[#?&]gid=(\d+)/.exec(tab.url ?? '');
+    sheets.push({
+      spreadsheetId: idMatch[1],
+      gid: gidMatch ? gidMatch[1] : null,
+      title: tab.title ?? null,
+      url: tab.url ?? null,
+      active: tab.active === true,
+      tabId: tab.id ?? null,
+      windowId: tab.windowId ?? null,
+    });
+  }
+  return sheets;
 }
 
 async function runInSheet(action, params) {
