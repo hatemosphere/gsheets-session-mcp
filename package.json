@@ -1,6 +1,6 @@
 {
   "name": "gsheets-session-mcp",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "MCP server to read, write, and diff a Google Sheet via your existing Chrome session (no OAuth, API key, or GCP project), using an unpacked extension that acts inside an open Sheets tab.",
   "type": "module",
   "license": "MIT",

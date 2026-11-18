@@ -548,7 +548,7 @@ const tools = {
 async function handle(msg) {
   switch (msg.method) {
     case 'initialize':
-      return { protocolVersion: msg.params?.protocolVersion ?? '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 'gsheets-session', version: '0.6.0' } };
+      return { protocolVersion: msg.params?.protocolVersion ?? '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 'gsheets-session', version: '0.6.1' } };
     case 'ping': return {};
     case 'tools/list':
       return { tools: Object.entries(tools).map(([name, t]) => ({ name, description: t.description, inputSchema: t.inputSchema })) };

@@ -193,6 +193,14 @@ the previous newest event's `time` as `since`:
   The extension's `webRequest` listener is restricted to Sheets URLs. It observes
   StreamRows request bodies (URL and form fields), then replays them in the tab;
   it does not expose browser cookies or response bodies on the bridge.
+- **Startup order.** The MCP is the WebSocket server, so the extension can only
+  connect once the MCP is running. The extension only attempts to connect while a
+  Sheets tab is open and retries with backoff, so it links up automatically when
+  the MCP starts. If Chrome has a sheet open before the MCP is up, Chrome logs one
+  or more `net::ERR_CONNECTION_REFUSED` lines on `ws://127.0.0.1:17834` in the
+  extension's error panel; these are the browser's own logs of the refused socket
+  (the extension cannot suppress them), they are harmless, and they stop once the
+  MCP is running. Start the MCP before opening the sheet to avoid them entirely.
 
 ## Files
 

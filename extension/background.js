@@ -68,8 +68,19 @@ function queueStreamBatch(tabId, url, requestBody) {
   }, 600);
 }
 
-function connect() {
+async function hasSheetTab() {
+  try {
+    const tabs = await chrome.tabs.query({ url: 'https://docs.google.com/spreadsheets/d/*' });
+    return tabs.length > 0;
+  } catch { return false; }
+}
+
+async function connect() {
   if (socket && (socket.readyState === WebSocket.CONNECTING || socket.readyState === WebSocket.OPEN)) return;
+  // The MCP is the WebSocket server; it only runs when a sheet is in use. With no
+  // Sheets tab open there is nothing to serve, so skip the connect and avoid a
+  // (browser-logged) net::ERR_CONNECTION_REFUSED while the MCP is not running.
+  if (!(await hasSheetTab())) return;
   const ws = new WebSocket(BRIDGE_URL);
   socket = ws;
 
@@ -102,7 +113,7 @@ function connect() {
     if (socket === ws) socket = null;
     clearTimeout(reconnectTimer);
     reconnectTimer = setTimeout(connect, retryDelay);
-    retryDelay = Math.min(retryDelay * 2, 15_000);
+    retryDelay = Math.min(retryDelay * 2, 60_000);
   };
 }
 
@@ -160,6 +171,6 @@ chrome.webRequest.onBeforeRequest.addListener((details) => {
   queueStreamBatch(details.tabId, details.url, details.requestBody);
   maybeCaptureSave(details.tabId, details.url, details.requestBody);
 }, { urls: ['https://docs.google.com/spreadsheets/*'] }, ['requestBody']);
-chrome.alarms.create('gsheets-session-reconnect', { periodInMinutes: 0.5 });
+chrome.alarms.create('gsheets-session-reconnect', { periodInMinutes: 1 });
 chrome.alarms.onAlarm.addListener(connect);
 connect();
