@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "Google Sheets MCP Session Bridge",
+  "version": "1.1.0",
+  "description": "Routes local gsheets-session MCP requests through an open Google Sheets tab.",
+  "permissions": ["alarms", "scripting", "webRequest"],
+  "host_permissions": [
+    "https://docs.google.com/spreadsheets/*",
+    "ws://127.0.0.1/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://docs.google.com/spreadsheets/d/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
